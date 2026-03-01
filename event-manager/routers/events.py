@@ -7,7 +7,7 @@ from database import get_db
 from models import Event, User
 from .auth import SECRET_KEY, ALGORITHM
 from jose import jwt, JWTError
-
+from models import Event, User, Registration
 router = APIRouter(prefix="/events", tags=["Events"])
 
 # --- Auth helper ---
@@ -90,8 +90,24 @@ def update_event(
         raise HTTPException(status_code=404, detail="Event not found")
     if event.organizer_id != user.id:
         raise HTTPException(status_code=403, detail="Not your event")
+
+    # Calculate how many people are already registered
+    registered_count = db.query(Registration).filter(Registration.event_id == event_id).count()
+
+    # Don't allow reducing seats below current registrations
+    if data.total_seats < registered_count:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot reduce seats below current registration count ({registered_count})"
+        )
+
+    # Update all fields
     for key, value in data.model_dump().items():
         setattr(event, key, value)
+
+    # Recalculate seats remaining based on new total
+    event.seats_remaining = data.total_seats - registered_count
+
     db.commit()
     db.refresh(event)
     return event
